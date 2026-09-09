@@ -21,7 +21,7 @@ if not os.path.exists(csv_file):
 # 2. AI Core
 use_device = 0 if torch.cuda.is_available() else "cpu"
 print(f"[TACTICAL AI] Inference Core: {use_device}")
-model = YOLO("yolov8n.pt")
+model = YOLO("yolov8n.engine")
 TARGET_CLASSES = [0, 1, 2, 3, 5, 7, 14, 15, 16, 17, 18, 19, 21]
 
 # 3. AirSim Client Initialization
@@ -37,7 +37,7 @@ print("[TACTICAL RECON] Arming and initiating launch...")
 client.takeoffAsync().join()
 
 # Clear ground, trees, and street obstacles safely at 12m
-CRUISE_ALTITUDE = -12.0
+CRUISE_ALTITUDE = -25.0
 PATROL_SPEED = 2.5
 
 print(f"[TACTICAL RECON] Climbing to cruise altitude ({-CRUISE_ALTITUDE:.0f}m)...")
@@ -129,8 +129,10 @@ while True:
 
         else:
             # AI Inference & Tracking
-            results = model.predict(
+            results = model.track(
                 source=frame_rgb,
+                persist=True,
+                tracker="botsort.yaml",
                 conf=0.35,
                 classes=TARGET_CLASSES,
                 verbose=False,
@@ -180,30 +182,51 @@ while True:
                         last_log_time = time.time()
 
             else:
-                # Regular Patrol Logic
-                if active_mode == "TARGET_LOCK" and (time.time() - target_lost_time) > 3.0:
-                    active_mode = "PATROL"
-                    navigate_to_wp(current_wp_idx)
+                # Calculate distance to current waypoint
+                tx, ty, _ = waypoints[current_wp_idx]
+                dist_to_wp = np.sqrt((pos.x_val - tx)**2 + (pos.y_val - ty)**2)
 
-                if active_mode != "TARGET_LOCK":
-                    active_mode = "PATROL"
-                    tx, ty, _ = waypoints[current_wp_idx]
-                    dist = np.sqrt((pos.x_val - tx)**2 + (pos.y_val - ty)**2)
-                    if dist < 2.5:
+                # State Machine: Return to Patrol from Evasion or Target Loss
+                if active_mode != "PATROL":
+                    if active_mode == "TARGET_LOCK" and (time.time() - target_lost_time) <= 3.0:
+                        pass # Coasting: Wait 3 seconds before giving up the search
+                    else:
+                        print(f"[NAV CORE] Path clear / Target lost. Resuming trajectory to Sector {current_wp_idx + 1}.")
+                        active_mode = "PATROL"
+                        navigate_to_wp(current_wp_idx) # Re-issue the movement command!
+
+                # State Machine: Normal Patrol Waypoint Progression
+                if active_mode == "PATROL":
+                    if dist_to_wp < 2.5:
                         current_wp_idx = (current_wp_idx + 1) % len(waypoints)
                         navigate_to_wp(current_wp_idx)
 
-        # Telemetry Overlays
-        mode_color = (0, 0, 255) if active_mode in ["TARGET_LOCK", "EVADING"] else (0, 255, 0)
-        cv2.putText(annotated_rgb, f"STATUS: {active_mode}", (20, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, mode_color, 2)
-        cv2.putText(annotated_rgb, f"ALT: {alt:.1f}M | DIST C: {dist_center:.1f}M", (20, 60),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+       # --- Metrics Calculation ---
+        # Calculate speed (m/s)
+        vx = state.kinematics_estimated.linear_velocity.x_val
+        vy = state.kinematics_estimated.linear_velocity.y_val
+        speed_ms = np.sqrt(vx**2 + vy**2)
+        
+        # Calculate distance to waypoint (m)
+        tx, ty, _ = waypoints[current_wp_idx]
+        dist_to_wp = np.sqrt((pos.x_val - tx)**2 + (pos.y_val - ty)**2)
 
-        cv2.putText(thermal_resized, "[DEPTH OBSTACLE RADAR]", (20, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-        cv2.putText(thermal_resized, f"L:{dist_left:.1f}m | C:{dist_center:.1f}m | R:{dist_right:.1f}m", (20, 60),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        # Calculate FPS
+        current_time = time.time()
+        fps = 1.0 / (current_time - getattr(sys.modules[__name__], 'last_frame_time', current_time - 0.03))
+        last_frame_time = current_time
+
+        # --- Telemetry Overlays ---
+        mode_color = (0, 0, 255) if active_mode in ["TARGET_LOCK", "EVADING"] else (0, 255, 0)
+        
+        # Primary HUD (Left)
+        cv2.putText(annotated_rgb, f"STATUS: {active_mode}", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, mode_color, 2)
+        cv2.putText(annotated_rgb, f"ALT: {alt:.1f}m | SPD: {speed_ms:.1f} m/s | FPS: {fps:.1f}", (20, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+        cv2.putText(annotated_rgb, f"WP DIST: {dist_to_wp:.1f}m | TGT DIST C: {dist_center:.1f}m", (20, 85), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+
+        # Depth Radar (Right)
+        cv2.putText(thermal_resized, "[DEPTH OBSTACLE RADAR]", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        cv2.putText(thermal_resized, f"L: {dist_left:.1f}m | C: {dist_center:.1f}m | R: {dist_right:.1f}m", (20, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
         # Crosshairs
         cv2.drawMarker(annotated_rgb, (w // 2, h // 2), (0, 255, 0), markerType=cv2.MARKER_CROSS, markerSize=18, thickness=1)
