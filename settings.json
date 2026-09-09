@@ -1,0 +1,20 @@
+{
+  "SeeDocsAt": "https://github.com/Microsoft/AirSim/blob/main/docs/settings.md",
+  "SettingsVersion": 1.2,
+  "SimMode": "Multirotor",
+  "ClockSpeed": 1,
+  "ViewMode": "FlyWithMe",
+  "CameraDefaults": {
+    "CaptureSettings": [
+      {
+        "ImageType": 0,
+        "Width": 640,
+        "Height": 480,
+        "FOV_Degrees": 90
+      }
+    ]
+  },
+  "SubWindows": [
+    {"WindowID": 0, "ImageType": 0, "CameraName": "0", "Visible": true}
+  ]
+}
