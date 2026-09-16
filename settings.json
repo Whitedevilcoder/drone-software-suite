@@ -9,21 +9,19 @@
       {
         "ImageType": 0,
         "MotionBlurAmount": 0.0,
-        "Width": 640,
-        "Height": 480,
+        "Width": 1280,
+        "Height": 720,
+        "FOV_Degrees": 120
+      },
+      {
+        "ImageType": 2,
+        "Width": 1280,
+        "Height": 720,
         "FOV_Degrees": 120
       }
     ]
   },
   "SubWindows": [
     {"WindowID": 0, "ImageType": 0, "CameraName": "0", "Visible": true}
-  ],
-  // "Vehicles":{
-  //   "Drone1":{
-  //     "VehicleType": "SimpleFlight",
-  //     "defaultVehicleState": "Armed",
-  //     "X": 0, "Y": 0, "Z": 0,
-  //     "Pitch":0, "Roll":0, "Yaw":0, 
-  //   }
-  // }
+  ]
 }
