@@ -3,7 +3,7 @@ import torch
 
 # --- FLIGHT SETTINGS ---
 CRUISE_ALTITUDE = -12.0  # Raised to 18 meters for better training FOV
-PATROL_SPEED = 2.5
+PATROL_SPEED = 12
 OBSTACLE_TRIGGER_DIST = 5.0
 CMD_INTERVAL = 0.1  
 

@@ -12,13 +12,18 @@ class ReconVision:
         print(f"[TACTICAL AI] Booting Inference Core on Device: {USE_DEVICE}")
         self.model = YOLO(MODEL_PATH)
         self.active_target_id = -1
-        self.last_log_time = 0
+        self.target_log_timers = {} 
+        
+        # --- NEW: GEO-SPATIAL MEMORY BANK ---
+        self.spatial_memory = [] 
+        self.SPATIAL_TOLERANCE = 8.0 # Meters radius to classify a vehicle as "already logged"
         
         os.makedirs(OUTPUT_DIR, exist_ok=True)
         if not os.path.exists(CSV_FILE):
             with open(CSV_FILE, mode="w", newline="") as f:
                 writer = csv.writer(f)
-                writer.writerow(["Timestamp", "Class", "Confidence", "Pos_X", "Pos_Y", "Altitude_M", "Speed_MS", "Snapshot_File"])
+                # Added 'Status' column to track New vs Re-detected targets
+                writer.writerow(["Timestamp", "Class", "Confidence", "Pos_X", "Pos_Y", "Altitude_M", "Speed_MS", "Snapshot_File", "Status"])
 
     def decode_frame(self, image_response):
         encoded_data = np.frombuffer(image_response.image_data_uint8, dtype=np.uint8)
@@ -28,12 +33,8 @@ class ReconVision:
         dh, dw = depth_response.height, depth_response.width
         depth_raw = np.array(depth_response.image_data_float, dtype=np.float32).reshape(dh, dw)
         
-        # --- DEFENSE SENSOR FILTER ---
-        # Increased blindspot to 1.5m to ensure propellers/chassis are never detected
         depth_clean = np.where((depth_raw > 1.5) & (depth_raw < 60.0), depth_raw, 60.0)
         
-        # STRICT HORIZON CROP: Only scan the middle 20% of the screen. 
-        # This prevents the ground from triggering evasion when the drone pitches forward.
         y_start, y_end = int(dh * 0.4), int(dh * 0.6)
         x_third = dw // 3
         
@@ -61,31 +62,74 @@ class ReconVision:
         annotated_rgb = results[0].plot()
         boxes = results[0].boxes
         target_cx, target_cy, error_x = None, None, None
-        active_class = "NONE" # NEW: Track the class name
+        active_class = "NONE"
         
-        if len(boxes) > 0 and boxes.id is not None:
-            ids = boxes.id.cpu().numpy().astype(int)
+        if len(boxes) > 0:
             confs = boxes.conf.cpu().numpy()
+            clss = boxes.cls.cpu().numpy().astype(int)
+            curr_time = time.time()
             
-            if self.active_target_id not in ids:
-                best_idx = np.argmax(confs)
-                self.active_target_id = ids[best_idx]
+            if boxes.id is not None:
+                ids = boxes.id.cpu().numpy().astype(int)
+            else:
+                ids = np.arange(len(boxes)) * -1 - 1
                 
-            target_idx = np.where(ids == self.active_target_id)[0]
-            if len(target_idx) > 0:
-                locked_box = boxes[target_idx[0]]
-                x1, y1, x2, y2 = map(int, locked_box.xyxy[0])
-                target_cx, target_cy = (x1 + x2) // 2, (y1 + y2) // 2
-                error_x = target_cx - (frame_rgb.shape[1] // 2)
-                active_class = self.model.names[int(locked_box.cls[0])].upper()
-
-                if float(locked_box.conf[0]) >= CONFIDENCE_THRESHOLD and (time.time() - self.last_log_time) > 1.5:
-                    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    img_filename = f"{active_class}_{ts}.jpg"
-                    cv2.imwrite(os.path.join(OUTPUT_DIR, img_filename), frame_rgb[max(0, y1):min(frame_rgb.shape[0], y2), max(0, x1):min(frame_rgb.shape[1], x2)])
+            # 1. SPATIAL SURVEILLANCE PIPELINE
+            for i in range(len(boxes)):
+                box_id = ids[i]
+                conf = confs[i]
+                label = self.model.names[clss[i]].upper()
+                
+                if conf >= CONFIDENCE_THRESHOLD and (curr_time - self.target_log_timers.get(box_id, 0)) > 2.0:
                     
-                    with open(CSV_FILE, mode="a", newline="") as f:
-                        csv.writer(f).writerow([ts, active_class, f"{float(locked_box.conf[0]):.2f}", f"{pos.x_val:.2f}", f"{pos.y_val:.2f}", f"{alt:.2f}", f"{speed_ms:.2f}", img_filename])
-                    self.last_log_time = time.time()
+                    # Cross-reference current telemetry against spatial memory
+                    is_known_stationary = False
+                    for memory in self.spatial_memory:
+                        dist = np.sqrt((pos.x_val - memory['x'])**2 + (pos.y_val - memory['y'])**2)
+                        if dist < self.SPATIAL_TOLERANCE and memory['class'] == label:
+                            is_known_stationary = True
+                            break
+                            
+                    ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:19]
+                    id_tag = f"ID{box_id}" if box_id >= 0 else f"UNTRACKED_{i}"
+                    
+                    if not is_known_stationary:
+                        # NEW TARGET: Process crop, save to disk, and log to memory bank
+                        img_filename = f"{label}_{id_tag}_{ts}.jpg"
+                        b = boxes[i]
+                        x1, y1, x2, y2 = map(int, b.xyxy[0])
+                        crop = frame_rgb[max(0, y1):min(frame_rgb.shape[0], y2), max(0, x1):min(frame_rgb.shape[1], x2)]
+                        
+                        if crop.size > 0:
+                            cv2.imwrite(os.path.join(OUTPUT_DIR, img_filename), crop)
+                            with open(CSV_FILE, mode="a", newline="") as f:
+                                csv.writer(f).writerow([ts, f"{label}-{id_tag}", f"{conf:.2f}", f"{pos.x_val:.2f}", f"{pos.y_val:.2f}", f"{alt:.2f}", f"{speed_ms:.2f}", img_filename, "NEW_TARGET"])
+                            
+                            self.spatial_memory.append({'class': label, 'x': pos.x_val, 'y': pos.y_val})
+                    else:
+                        # KNOWN TARGET: Bypass image processing, push lightweight text update
+                        with open(CSV_FILE, mode="a", newline="") as f:
+                            csv.writer(f).writerow([ts, f"{label}-{id_tag}", f"{conf:.2f}", f"{pos.x_val:.2f}", f"{pos.y_val:.2f}", f"{alt:.2f}", f"{speed_ms:.2f}", "NO_IMAGE_SAVED", "STATIONARY_UPDATE"])
+                    
+                    self.target_log_timers[box_id] = curr_time
+
+            # 2. FLIGHT KINEMATICS PIPELINE
+            valid_ids_mask = ids >= 0
+            if np.any(valid_ids_mask):
+                valid_ids = ids[valid_ids_mask]
+                valid_confs = confs[valid_ids_mask]
+                
+                if self.active_target_id not in valid_ids:
+                    best_idx = np.argmax(valid_confs)
+                    self.active_target_id = valid_ids[best_idx]
+                    print(f"\n[TACTICAL AI] Target Acquired - Lock ID: {self.active_target_id}")
+
+                target_idx = np.where(ids == self.active_target_id)[0]
+                if len(target_idx) > 0:
+                    locked_box = boxes[target_idx[0]]
+                    x1, y1, x2, y2 = map(int, locked_box.xyxy[0])
+                    target_cx, target_cy = (x1 + x2) // 2, (y1 + y2) // 2
+                    error_x = target_cx - (frame_rgb.shape[1] // 2)
+                    active_class = self.model.names[int(locked_box.cls[0])].upper()
 
         return annotated_rgb, target_cx, target_cy, error_x, active_class
