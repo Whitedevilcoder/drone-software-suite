@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { adminLogin, fetchAllQuotes, updateQuoteStatus } from "../services/api";
+import { adminLogin, fetchAllQuotes, updateQuoteStatus } from "../services/api.js";
 
 const STATUS_OPTIONS = ["NEW", "CONTACTED", "PROPOSAL_SENT", "WON", "LOST"];
 
@@ -60,7 +60,7 @@ export default function AdminDashboard() {
             className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm"
             required
           />
-          <button type="submit" className="w-full bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold py-2 rounded">
+          <button type="submit" className="w-full bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold py-2 rounded cursor-pointer">
             Authenticate
           </button>
         </form>
@@ -87,7 +87,7 @@ export default function AdminDashboard() {
               localStorage.removeItem("vg_admin_token");
               setToken("");
             }}
-            className="text-xs border border-slate-700 px-3 py-1.5 rounded hover:bg-slate-800"
+            className="text-xs border border-slate-700 px-3 py-1.5 rounded hover:bg-slate-800 cursor-pointer"
           >
             Logout
           </button>

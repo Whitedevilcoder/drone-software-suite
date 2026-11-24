@@ -1,4 +1,6 @@
-import "dotenv/config";
+import dotenv from "dotenv";
+import path from "path";
+import { fileURLToPath } from "url";
 import express from "express";
 import mongoose from "mongoose";
 import cors from "cors";
@@ -6,13 +8,35 @@ import helmet from "helmet";
 import quoteRoutes from "./routes/quoteRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.join(__dirname, ".env") });
+
+if (!process.env.MONGO_URI) {
+  console.error("FATAL: MONGO_URI is missing in server/.env");
+  process.exit(1);
+}
+
 const app = express();
 
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  ...(process.env.CLIENT_URL ? process.env.CLIENT_URL.split(",").map((u) => u.trim().replace(/\/+$/, "")) : []),
+];
+
 app.use(helmet());
-app.use(cors({ origin: process.env.CLIENT_URL || "*" }));
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      return callback(new Error(`CORS blocked origin: ${origin}`));
+    },
+  })
+);
 app.use(express.json({ limit: "50kb" }));
 
-// Health check endpoint for external cron keep-alive pings
 app.get("/api/health", (req, res) => {
   res.status(200).json({ status: "OK", timestamp: new Date().toISOString() });
 });
@@ -25,10 +49,10 @@ const PORT = process.env.PORT || 5000;
 mongoose
   .connect(process.env.MONGO_URI)
   .then(() => {
-    console.log("Connected to MongoDB Atlas");
-    app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+    console.log("[OK] Connected to MongoDB Atlas");
+    app.listen(PORT, () => console.log(`[OK] Server listening on http://localhost:${PORT}`));
   })
   .catch((err) => {
-    console.error("MongoDB connection error:", err);
+    console.error("[FATAL] MongoDB connection error:", err.message);
     process.exit(1);
   });

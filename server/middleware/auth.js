@@ -8,8 +8,7 @@ export function requireAdmin(req, res, next) {
 
   const token = authHeader.split(" ")[1];
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.admin = decoded;
+    req.admin = jwt.verify(token, process.env.JWT_SECRET);
     next();
   } catch {
     return res.status(401).json({ error: "Unauthorized: Invalid or expired token" });

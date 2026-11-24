@@ -7,12 +7,11 @@ import { dispatchQuoteEmails } from "../utils/mailer.js";
 const router = express.Router();
 
 const quoteLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // max 5 quote submissions per IP per 15 mins
+  windowMs: 15 * 60 * 1000,
+  max: 20,
   message: { error: "Too many requests. Please try again in 15 minutes." },
 });
 
-// PUBLIC: Submit new B2B quote
 router.post("/", quoteLimiter, async (req, res) => {
   try {
     const {
@@ -40,14 +39,13 @@ router.post("/", quoteLimiter, async (req, res) => {
       email,
       phone,
       serviceType,
-      location,
+      location: location || "Chhattisgarh / Central India",
       estimatedValueINR: Number(estimatedValueINR) || 0,
-      projectNotes,
+      projectNotes: projectNotes || "",
     });
 
-    // Fire emails without blocking HTTP response
     dispatchQuoteEmails(newQuote).catch((err) =>
-      console.error("Email dispatch error:", err.message)
+      console.error("[MAILER ERROR]:", err.message)
     );
 
     res.status(201).json({
@@ -56,21 +54,19 @@ router.post("/", quoteLimiter, async (req, res) => {
     });
   } catch (err) {
     console.error("Quote creation failed:", err);
-    res.status(500).json({ error: "Internal server error" });
+    res.status(500).json({ error: err.message || "Internal server error" });
   }
 });
 
-// ADMIN: List all leads
 router.get("/", requireAdmin, async (req, res) => {
   try {
     const quotes = await Quote.find().sort({ createdAt: -1 });
     res.json(quotes);
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: "Failed to fetch quotes" });
   }
 });
 
-// ADMIN: Update deal stage or notes
 router.patch("/:id", requireAdmin, async (req, res) => {
   try {
     const { status, adminNotes } = req.body;
@@ -81,7 +77,7 @@ router.patch("/:id", requireAdmin, async (req, res) => {
     );
     if (!updated) return res.status(404).json({ error: "Lead not found" });
     res.json(updated);
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: "Failed to update lead" });
   }
 });

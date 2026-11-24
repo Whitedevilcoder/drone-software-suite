@@ -1,4 +1,19 @@
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+const RAW_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+const API_BASE = RAW_BASE.replace(/\/+$/, "");
+
+async function parseResponse(res) {
+  const text = await res.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error(`Invalid server response (HTTP ${res.status}) from ${API_BASE}`);
+  }
+  if (!res.ok) {
+    throw new Error(data.error || `Request failed (${res.status})`);
+  }
+  return data;
+}
 
 export async function submitQuoteRequest(payload) {
   const res = await fetch(`${API_BASE}/quotes`, {
@@ -6,9 +21,7 @@ export async function submitQuoteRequest(payload) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Submission failed");
-  return data;
+  return parseResponse(res);
 }
 
 export async function adminLogin(email, password) {
@@ -17,8 +30,7 @@ export async function adminLogin(email, password) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Login failed");
+  const data = await parseResponse(res);
   return data.token;
 }
 
@@ -26,8 +38,7 @@ export async function fetchAllQuotes(token) {
   const res = await fetch(`${API_BASE}/quotes`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!res.ok) throw new Error("Unauthorized");
-  return res.json();
+  return parseResponse(res);
 }
 
 export async function updateQuoteStatus(token, id, updates) {
@@ -39,6 +50,5 @@ export async function updateQuoteStatus(token, id, updates) {
     },
     body: JSON.stringify(updates),
   });
-  if (!res.ok) throw new Error("Update failed");
-  return res.json();
+  return parseResponse(res);
 }
