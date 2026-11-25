@@ -44,9 +44,12 @@ router.post("/", quoteLimiter, async (req, res) => {
       projectNotes: projectNotes || "",
     });
 
-    dispatchQuoteEmails(newQuote).catch((err) =>
-      console.error("[MAILER ERROR]:", err.message)
-    );
+    // Await email dispatch before responding so Render does not throttle the worker mid-send
+    try {
+      await dispatchQuoteEmails(newQuote);
+    } catch (mailErr) {
+      console.error("[MAILER ERROR]:", mailErr.message);
+    }
 
     res.status(201).json({
       message: "Quote request logged successfully.",
