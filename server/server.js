@@ -37,6 +37,14 @@ app.use(
 );
 app.use(express.json({ limit: "50kb" }));
 
+app.get("/", (req, res) => {
+  res.status(200).json({
+    service: "VayuGrid Aerospace API",
+    status: "ONLINE",
+    health: "/api/health",
+  });
+});
+
 app.get("/api/health", (req, res) => {
   res.status(200).json({ status: "OK", timestamp: new Date().toISOString() });
 });
